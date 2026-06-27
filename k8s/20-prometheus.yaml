@@ -38,15 +38,17 @@ data:
         static_configs:
           - targets: ['localhost:9090']
 
-      # ── 외부 DB exporter (DB 연결 단계에서 활성화) ──────────────────
-      # 외부 DB 서버에서 도는 exporter 를 이 standalone Prometheus 가 직접 원격 scrape.
-      # 호스트/자격증명은 평문 커밋 금지 — 환경별로 채우고, 인증 필요 시 시크릿 사용.
-      # - job_name: postgresql
-      #   static_configs:
-      #     - targets: ['<postgres-exporter-host>:9187']
-      # - job_name: altibase
-      #   static_configs:
-      #     - targets: ['<altibase-exporter-host>:<port>']
+      # ── 외부 DB exporter ───────────────────────────────────────────
+      # 외부 DB 서버에서 도는 exporter 를 이 standalone Prometheus 가 원격 scrape.
+      # 타깃(호스트:포트) 목록은 DB 호스트/IP 평문 커밋을 피하기 위해 repo 에 두지 않고,
+      # 클러스터에만 생성하는 ConfigMap(prometheus-bench-targets) 을 file_sd 로 읽는다.
+      #   파일: /etc/prometheus/targets/<job>.json (예: [{"targets":["<host>:9187"],"labels":{...}}])
+      - job_name: postgresql
+        file_sd_configs:
+          - files: ['/etc/prometheus/targets/postgresql.json']
+      - job_name: altibase
+        file_sd_configs:
+          - files: ['/etc/prometheus/targets/altibase.json']
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -110,12 +112,19 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/prometheus
+            - name: targets
+              mountPath: /etc/prometheus/targets
+              readOnly: true
             - name: storage
               mountPath: /prometheus
       volumes:
         - name: config
           configMap:
             name: prometheus-bench-config
+        - name: targets
+          configMap:
+            name: prometheus-bench-targets   # 타깃 목록(호스트:포트). 클러스터에만 생성, repo 미커밋.
+            optional: true                    # 없어도 Pod 기동 (타깃 비활성 상태로 시작)
         - name: storage
           emptyDir: {}          # 테스트용 휘발성. 운영은 PVC 로 교체.
 ---
