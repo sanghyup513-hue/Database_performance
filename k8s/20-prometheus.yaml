@@ -128,10 +128,11 @@ metadata:
     app.kubernetes.io/part-of: db-perf-benchmark
     app.kubernetes.io/component: prometheus
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: prometheus-bench
   ports:
     - name: http
       port: 9090
       targetPort: http
+      nodePort: 30090   # 테스트 접근용. 운영은 ingress/사내 정책에 맞춰 조정.
