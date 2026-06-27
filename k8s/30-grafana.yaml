@@ -20,11 +20,33 @@ data:
     apiVersion: 1
     datasources:
       - name: Prometheus
+        uid: prometheus-bench
         type: prometheus
         access: proxy
         url: http://prometheus-bench:9090
         isDefault: true
         editable: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: benchmark
+  labels:
+    app.kubernetes.io/part-of: db-perf-benchmark
+    app.kubernetes.io/component: grafana
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: benchmark
+        orgId: 1
+        folder: DB Benchmark
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -95,12 +117,23 @@ spec:
           volumeMounts:
             - name: datasources
               mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
             - name: storage
               mountPath: /var/lib/grafana
       volumes:
         - name: datasources
           configMap:
             name: grafana-datasources
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards         # 대시보드 JSON. repo 파일에서 생성, 없어도 기동.
+            optional: true
         - name: storage
           emptyDir: {}
 ---
