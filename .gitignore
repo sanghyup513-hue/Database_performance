@@ -1,0 +1,12 @@
+# 자격증명/시크릿 — 절대 커밋 금지
+.env
+*.env
+!docker/jmeter/**/*.env.example
+.pgpass
+
+# JDBC 드라이버 jar (라이선스/배포 제약 가능)
+docker/jmeter/drivers/*.jar
+
+# 부하 테스트 결과물
+jmeter/results/
+*.jtl
