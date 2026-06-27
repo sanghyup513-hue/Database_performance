@@ -1,0 +1,123 @@
+# Grafana (벤치마크 대시보드) — benchmark 네임스페이스, standalone Prometheus 연결.
+#
+# - admin 자격증명은 이 매니페스트에 넣지 않는다. Secret `grafana-admin` 을 별도로 생성:
+#     kubectl -n benchmark create secret generic grafana-admin \
+#       --from-literal=admin-user=admin --from-literal=admin-password='<생성한값>'
+# - 데이터소스(Prometheus)는 provisioning ConfigMap 으로 자동 연결.
+# - 접근: NodePort 30030 (테스트). 운영은 ingress 또는 사내 정책에 맞춰 조정.
+# - storage: emptyDir(테스트). 운영은 PVC 권장.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: benchmark
+  labels:
+    app.kubernetes.io/part-of: db-perf-benchmark
+    app.kubernetes.io/component: grafana
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-bench:9090
+        isDefault: true
+        editable: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: benchmark
+  labels:
+    app.kubernetes.io/part-of: db-perf-benchmark
+    app.kubernetes.io/component: grafana
+    app: grafana
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: db-perf-benchmark
+        app.kubernetes.io/component: grafana
+        app: grafana
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:13.0.2
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: admin-user
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: admin-password
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: storage
+              mountPath: /var/lib/grafana
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: benchmark
+  labels:
+    app.kubernetes.io/part-of: db-perf-benchmark
+    app.kubernetes.io/component: grafana
+spec:
+  type: NodePort
+  selector:
+    app: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      nodePort: 30030
