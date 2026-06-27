@@ -44,6 +44,13 @@ RUN set -eux; \
     curl -fSL "https://repo1.maven.org/maven2/org/postgresql/postgresql/${PG_JDBC_VERSION}/postgresql-${PG_JDBC_VERSION}.jar" \
       -o "${JMETER_HOME}/lib/postgresql-${PG_JDBC_VERSION}.jar"
 
+# ── JMeter Prometheus 리스너 플러그인 (요청측 메트릭 /metrics 노출) ──
+ARG PROM_PLUGIN_VERSION=0.7.1
+RUN set -eux; \
+    curl -fSL "https://github.com/johrstrom/jmeter-prometheus-plugin/releases/download/${PROM_PLUGIN_VERSION}/jmeter-prometheus-plugin-${PROM_PLUGIN_VERSION}.jar" \
+      -o "${JMETER_HOME}/lib/ext/jmeter-prometheus-plugin-${PROM_PLUGIN_VERSION}.jar"; \
+    printf '\n# benchmark: expose prometheus listener on all interfaces\nprometheus.ip=0.0.0.0\nprometheus.port=9270\n' >> "${JMETER_HOME}/bin/user.properties"
+
 # ── Altibase 등 추가 JDBC 드라이버 주입 (drivers/*.jar 있으면) ──────
 COPY drivers/ /tmp/drivers/
 RUN set -eux; \

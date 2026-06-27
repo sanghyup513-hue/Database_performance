@@ -49,6 +49,11 @@ data:
       - job_name: altibase
         file_sd_configs:
           - files: ['/etc/prometheus/targets/altibase.json']
+      # JMeter 부하 생성기(요청측 메트릭). 부하 실행 중에만 타깃 존재(ephemeral).
+      - job_name: jmeter
+        scrape_interval: 5s
+        file_sd_configs:
+          - files: ['/etc/prometheus/targets/jmeter.json']
 ---
 apiVersion: apps/v1
 kind: Deployment

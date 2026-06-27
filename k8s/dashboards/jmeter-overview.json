@@ -1,0 +1,81 @@
+{
+  "uid": "jmeter-load-overview",
+  "title": "JMeter - Load Generator (client side)",
+  "tags": ["db-benchmark", "jmeter"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Throughput (req/s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus-bench" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "thresholds": { "steps": [{ "color": "blue", "value": null }] } }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "textMode": "value" },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus-bench" }, "expr": "sum(rate(jmeter_count_total[1m]))" }]
+    },
+    {
+      "type": "stat",
+      "title": "Active threads",
+      "datasource": { "type": "prometheus", "uid": "prometheus-bench" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "textMode": "value" },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus-bench" }, "expr": "sum(jmeter_threads{state=\"active\"})" }]
+    },
+    {
+      "type": "stat",
+      "title": "Error rate (%)",
+      "datasource": { "type": "prometheus", "uid": "prometheus-bench" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 2, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value" },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus-bench" }, "expr": "100 * sum(rate(jmeter_count_total{code!=\"200\"}[1m])) / clamp_min(sum(rate(jmeter_count_total[1m])), 1)" }]
+    },
+    {
+      "type": "stat",
+      "title": "Total samples",
+      "datasource": { "type": "prometheus", "uid": "prometheus-bench" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "steps": [{ "color": "blue", "value": null }] } }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "textMode": "value" },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus-bench" }, "expr": "sum(jmeter_count_total)" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Throughput by sampler (req/s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus-bench" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus-bench" }, "expr": "sum by (label) (rate(jmeter_count_total[1m]))", "legendFormat": "{{label}}" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Response time by sampler / quantile (ms)",
+      "datasource": { "type": "prometheus", "uid": "prometheus-bench" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "drawStyle": "line", "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus-bench" }, "expr": "jmeter_response_time{code=\"200\"}", "legendFormat": "{{label}} p{{quantile}}" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Errors by code (req/s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus-bench" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "stacking": { "mode": "normal" }, "fillOpacity": 30, "showPoints": "never" } }, "overrides": [] },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus-bench" }, "expr": "sum by (code) (rate(jmeter_count_total{code!=\"200\"}[1m]))", "legendFormat": "{{code}}" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Threads",
+      "datasource": { "type": "prometheus", "uid": "prometheus-bench" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "fillOpacity": 10, "showPoints": "never" } }, "overrides": [] },
+      "targets": [{ "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus-bench" }, "expr": "jmeter_threads", "legendFormat": "{{state}}" }]
+    }
+  ]
+}
