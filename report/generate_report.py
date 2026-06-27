@@ -40,6 +40,28 @@ TT_ORDER = [t[0] for t in TESTTYPES]
 TT_NAME = {t[0]: t[1] for t in TESTTYPES}
 TT_DESC = {t[0]: t[2] for t in TESTTYPES}
 
+# 유형별 상세 설명 (워크로드 / 측정 의도 / 해석)
+TT_EXPLAIN = {
+    "01_read_only":
+        "SELECT 전용 워크로드. 기본키 단건 조회(point), 1,000행 구간 집계(range scan), "
+        "account×branch 조인 3가지를 섞어 돌린다. 인덱스 탐색·버퍼 캐시 적중·읽기 처리량을 본다. "
+        "지연시간이 낮고 처리량이 높을수록 읽기 성능이 우수하다.",
+    "02_write_heavy":
+        "잔액 UPDATE 와 이력 INSERT 위주의 쓰기 부하. 쓰기 처리량과 함께 트랜잭션 로그(WAL)·"
+        "행 잠금 경합·디스크 쓰기 부담의 영향을 본다. 쓰기 집약 업무(적재/갱신)의 지표.",
+    "03_mixed_oltp":
+        "TPC-B 류 거래 트랜잭션 믹스: account·teller·branch UPDATE + history INSERT + 잔액 SELECT. "
+        "실제 OLTP(거래성 업무)에 가장 가까운 읽기·쓰기 혼합 부하로, 종합적인 처리량/지연을 대표한다.",
+    "04_high_concurrency":
+        "동일한 가벼운 OLTP 단위(조회+갱신)를 동시 스레드 수를 단계적으로 올려가며 측정한다. "
+        "커넥션·동시성 확장성과 포화(성능이 더 안 오르는) 지점을 파악한다. "
+        "(대상 DB 커넥션 한계 내에서 측정; 한계 초과 측정은 max_connections 상향 필요.)",
+    "05_large_workload":
+        "100만 행 풀스캔·집계(GROUP BY)·대용량 조인(OLAP 성격) + 대량 배치 UPDATE. "
+        "대용량 분석/배치 처리 성능을 본다. 단건 OLTP와 달리 지연시간이 본질적으로 크며(수백 ms~초), "
+        "처리량보다 단일 쿼리 응답시간이 핵심 지표다.",
+}
+
 FNAME_RE = re.compile(r"^(?P<db>[a-z0-9]+)__(?P<key>\d{2}_[a-z_]+)\.jtl$", re.I)
 
 
@@ -246,8 +268,15 @@ def build(data, meta, charts, outpath):
           Paragraph("측정 지표는 TPS(처리량), 지연시간 p50/p95/p99, 에러율이다. 부하는 K8s 클러스터의 "
                     "JMeter가 JDBC로 생성하며, 두 DB에 동일한 테스트 계획·스케일을 적용한다.", st["body"]), PageBreak()]
 
+    # ── Test type explanations ──
+    E += [Paragraph("3. 테스트 유형 설명", st["h1"]), HRule(165 * mm), Spacer(1, 4 * mm)]
+    for k in TT_ORDER:
+        E += [Paragraph(f"{TT_NAME[k]} <font size=8 color='#888'>· {TT_DESC[k]}</font>", st["h2"]),
+              Paragraph(TT_EXPLAIN[k], st["body"]), Spacer(1, 3 * mm)]
+    E += [PageBreak()]
+
     # ── Charts ──
-    E += [Paragraph("3. 유형별 결과", st["h1"]), HRule(165 * mm), Spacer(1, 3 * mm)]
+    E += [Paragraph("4. 유형별 결과", st["h1"]), HRule(165 * mm), Spacer(1, 3 * mm)]
     for cap, img in charts:
         if img and os.path.exists(img):
             E += [Paragraph(cap, st["h2"]), Image(img, width=165 * mm, height=74 * mm), Spacer(1, 4 * mm)]
@@ -334,6 +363,10 @@ def build_html(data, meta, charts, outpath):
     chart_html = "\n".join(
         f"<h3>{esc(cap)}</h3><img class='chart' src='{b64img(img)}' alt='{esc(cap)}'/>"
         for cap, img in charts if img)
+    explain_html = "\n".join(
+        f"<div class='ex'><div class='ex-h'>{esc(TT_NAME[k])} "
+        f"<span class='ex-t'>· {esc(TT_DESC[k])}</span></div>"
+        f"<p>{esc(TT_EXPLAIN[k])}</p></div>" for k in TT_ORDER)
     appendix_html = "\n".join(
         f"<h3>{esc(meta['databases'][db]['label'])}</h3>"
         f"<div class='tw'><table class='data'>{appendix(db)}</table></div>" for db in dbs)
@@ -364,6 +397,11 @@ def build_html(data, meta, charts, outpath):
     table.env{min-width:0;} table.env th{width:38%;text-align:left;}
     table.env td{text-align:left;}
     img.chart{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;margin:4px 0 8px;}
+    .ex{border-left:4px solid var(--blue);background:var(--bg);border-radius:0 8px 8px 0;
+      padding:10px 14px;margin:10px 0;}
+    .ex-h{font-weight:700;color:var(--navy);font-size:14px;}
+    .ex-t{font-weight:400;color:#778;font-size:12px;}
+    .ex p{margin:6px 0 0;font-size:13px;}
     @media(max-width:600px){.cover h1{font-size:20px;}h2{font-size:16px;}}
     """
     title = esc(meta.get("title", "DB 성능 비교 벤치마크"))
@@ -385,7 +423,10 @@ def build_html(data, meta, charts, outpath):
   <table class="env">{env_rows}</table>
   <p class="note">측정 지표: TPS·지연시간 p50/p95/p99·에러율. K8s의 JMeter가 JDBC로 부하 생성, 두 DB에 동일 계획·스케일 적용.</p>
 
-  <h2>3. 유형별 결과</h2>
+  <h2>3. 테스트 유형 설명</h2>
+  {explain_html}
+
+  <h2>4. 유형별 결과</h2>
   {chart_html}
 
   <h2>부록. 상세 수치</h2>
