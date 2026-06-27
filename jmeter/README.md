@@ -10,7 +10,18 @@
 | `plans/03-mixed-oltp.jmx` | Mixed OLTP | TPC-B 류 믹스(account/teller/branch UPDATE + history INSERT + SELECT) |
 | `plans/04-high-concurrency.jmx` | 고동시성 확장성 | select+update 단위를 thread 단계 증가로 측정 |
 | `plans/05-large-workload.jmx` | 대용량 | 풀스캔/집계/조인(OLAP) + 대량 배치 UPDATE |
+| `plans/06-hot-row.jmx` | 핫로우 경합 | 소수 동일 행 동시 UPDATE (잠금/동시성 경합) |
+| `plans/07-rw-ratio.jmx` | 읽기/쓰기 비율 | 읽기:쓰기 비율 혼합 (스윕) |
 | `sql/schema.sql` | 스키마 | 포터블 DDL (pgbench/TPC-B 류) |
+| `../scripts/load_data.sh` | 적재 | SF 파라미터 데이터 적재 (규모 스케일링) |
+
+## 추가 테스트 (06 / 07 / 규모 스윕)
+- **06 핫로우 경합**: `-Jhotrows=10`(작을수록 경합↑) `-Jthreads=30`. 데드락/경합 지연 비교.
+- **07 읽기/쓰기 비율**: `-Jread_pct=50 -Jwrite_pct=50`(합 100). 0/20/50/100 으로 반복 실행하여 비율 스윕.
+- **데이터 규모 스케일링**: `scripts/load_data.sh` 로 `SF=10/100/1000` 재적재 후, 동일 플랜을 `-Jaccounts=<SF*100000>` 로 실행. SF별 결과를 비교(메모리 이내/초과 시나리오 — Altibase 특성).
+  ```sh
+  docker run --rm --env-file /tmp/bench.env -e SF=100 -v $PWD/scripts:/s postgres:17-alpine sh /s/load_data.sh
+  ```
 
 ## 스키마 / 데이터셋
 - 테이블: `bench_branch`, `bench_teller`, `bench_account`, `bench_history` (ANSI 포터블, `sql/schema.sql`).

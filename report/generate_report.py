@@ -35,6 +35,8 @@ TESTTYPES = [
     ("03_mixed_oltp",       "Mixed OLTP",       "TPC-B류 트랜잭션 믹스"),
     ("04_high_concurrency", "High-concurrency", "동시성 단계 증가"),
     ("05_large_workload",   "Large workload",   "대용량 스캔·집계·조인 + 배치 DML"),
+    ("06_hot_row",          "Hot-row contention", "동일 소수 행 동시 UPDATE (경합)"),
+    ("07_rw_ratio",         "Read/Write mix",   "읽기:쓰기 비율 혼합"),
 ]
 TT_ORDER = [t[0] for t in TESTTYPES]
 TT_NAME = {t[0]: t[1] for t in TESTTYPES}
@@ -60,6 +62,13 @@ TT_EXPLAIN = {
         "100만 행 풀스캔·집계(GROUP BY)·대용량 조인(OLAP 성격) + 대량 배치 UPDATE. "
         "대용량 분석/배치 처리 성능을 본다. 단건 OLTP와 달리 지연시간이 본질적으로 크며(수백 ms~초), "
         "처리량보다 단일 쿼리 응답시간이 핵심 지표다.",
+    "06_hot_row":
+        "소수의 동일 행(기본 10행)을 다수 스레드가 동시에 UPDATE 하여 잠금/동시성 제어 경합을 유도한다. "
+        "행 잠금 대기·MVCC 처리 방식 차이가 드러나며, 경합 심화 시 처리량 저하·지연 증가·데드락 발생 여부를 본다. "
+        "분산(XcruzDB) vs 인메모리(Altibase)의 동시성 제어 특성을 가장 잘 보여주는 항목.",
+    "07_rw_ratio":
+        "읽기:쓰기 비율(예 80:20 / 50:50)을 조절해 혼합 부하를 측정한다. 실제 애플리케이션은 순수 읽기/쓰기가 "
+        "아니라 중간 비율이므로, 비율을 바꿔가며(스윕) 처리량·지연 곡선을 비교한다.",
 }
 
 FNAME_RE = re.compile(r"^(?P<db>[a-z0-9]+)__(?P<key>\d{2}_[a-z_]+)\.jtl$", re.I)

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="06 Hot-row contention" enabled="true">
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+        <collectionProp name="Arguments.arguments"/>
+      </elementProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <boolProp name="TestPlan.tearDown_on_shutdown">true</boolProp>
+      <stringProp name="TestPlan.comments">소수의 동일 행(hotrows)을 다수 스레드가 동시 UPDATE → 동시성 제어/잠금 경합 비교. hotrows 작을수록 경합 심함.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <JDBCDataSource guiclass="TestBeanGUI" testclass="JDBCDataSource" testname="DB Connection" enabled="true">
+        <boolProp name="autocommit">true</boolProp>
+        <stringProp name="checkQuery">${__P(db.checkQuery,SELECT 1)}</stringProp>
+        <stringProp name="connectionAge">5000</stringProp>
+        <stringProp name="connectionProperties"></stringProp>
+        <stringProp name="dataSource">benchDB</stringProp>
+        <stringProp name="dbUrl">${__P(db.url)}</stringProp>
+        <stringProp name="driver">${__P(db.driver)}</stringProp>
+        <stringProp name="initQuery"></stringProp>
+        <boolProp name="keepAlive">true</boolProp>
+        <stringProp name="password">${__P(db.password)}</stringProp>
+        <stringProp name="poolMax">${__P(db.pool,40)}</stringProp>
+        <boolProp name="preinit">false</boolProp>
+        <stringProp name="timeout">10000</stringProp>
+        <stringProp name="transactionIsolation">DEFAULT</stringProp>
+        <stringProp name="trimInterval">60000</stringProp>
+        <stringProp name="username">${__P(db.user)}</stringProp>
+      </JDBCDataSource>
+      <hashTree/>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="contenders" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <intProp name="LoopController.loops">-1</intProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">${__P(threads,30)}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">${__P(rampup,5)}</stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.duration">${__P(duration,60)}</stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+        <boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+      </ThreadGroup>
+      <hashTree>
+        <JDBCSampler guiclass="TestBeanGUI" testclass="JDBCSampler" testname="update-hot-row" enabled="true">
+          <stringProp name="dataSource">benchDB</stringProp>
+          <stringProp name="query">UPDATE bench_account SET abalance = abalance + ${__Random(-1000,1000)} WHERE aid = ${__Random(1,${__P(hotrows,10)})}</stringProp>
+          <stringProp name="queryType">Update Statement</stringProp>
+          <stringProp name="queryArguments"></stringProp>
+          <stringProp name="queryArgumentsTypes"></stringProp>
+          <stringProp name="queryTimeout"></stringProp>
+          <stringProp name="resultSetHandler">Count Records</stringProp>
+          <stringProp name="resultSetMaxRows"></stringProp>
+          <stringProp name="resultVariable"></stringProp>
+          <stringProp name="variableNames"></stringProp>
+        </JDBCSampler>
+        <hashTree/>
+      </hashTree>
+      <com.github.johrstrom.listener.PrometheusListener guiclass="com.github.johrstrom.listener.gui.PrometheusListenerGui" testclass="com.github.johrstrom.listener.PrometheusListener" testname="Prometheus Listener" enabled="true">
+        <collectionProp name="prometheus.collector_definitions">
+          <elementProp name="" elementType="com.github.johrstrom.listener.ListenerCollectorConfig">
+            <stringProp name="collector.help">JMeter sample response time (ms)</stringProp>
+            <stringProp name="collector.metric_name">jmeter_response_time</stringProp>
+            <stringProp name="collector.type">SUMMARY</stringProp>
+            <collectionProp name="collector.labels">
+              <stringProp name="11">label</stringProp>
+              <stringProp name="12">code</stringProp>
+            </collectionProp>
+            <stringProp name="collector.quantiles_or_buckets">0.5,0.05|0.95,0.01|0.99,0.001</stringProp>
+            <stringProp name="listener.collector.listen_to">samples</stringProp>
+            <stringProp name="listener.collector.measuring">ResponseTime</stringProp>
+          </elementProp>
+          <elementProp name="" elementType="com.github.johrstrom.listener.ListenerCollectorConfig">
+            <stringProp name="collector.help">JMeter sample count</stringProp>
+            <stringProp name="collector.metric_name">jmeter_count</stringProp>
+            <stringProp name="collector.type">COUNTER</stringProp>
+            <collectionProp name="collector.labels">
+              <stringProp name="21">label</stringProp>
+              <stringProp name="22">code</stringProp>
+            </collectionProp>
+            <stringProp name="collector.quantiles_or_buckets"></stringProp>
+            <stringProp name="listener.collector.listen_to">samples</stringProp>
+            <stringProp name="listener.collector.measuring">CountTotal</stringProp>
+          </elementProp>
+        </collectionProp>
+      </com.github.johrstrom.listener.PrometheusListener>
+      <hashTree/>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>
