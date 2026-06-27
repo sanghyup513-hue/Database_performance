@@ -1,0 +1,6 @@
+# JDBC 드라이버 jar 는 커밋하지 않는다.
+# - Altibase 드라이버: 상용 DB 라이선스/배포 제약 가능 (README 보안·라이선스 항목)
+# - 빌드 시 이 디렉터리의 *.jar 가 이미지 lib/ 로 복사됨
+*.jar
+!.gitignore
+!README.md
