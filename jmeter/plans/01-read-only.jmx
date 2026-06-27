@@ -60,7 +60,7 @@
         <hashTree/>
         <JDBCSampler guiclass="TestBeanGUI" testclass="JDBCSampler" testname="range-scan" enabled="true">
           <stringProp name="dataSource">benchDB</stringProp>
-          <stringProp name="query">SELECT COUNT(*), SUM(abalance) FROM bench_account WHERE aid BETWEEN ${__Random(1,${__P(accounts,100000)})} AND ${__Random(1,${__P(accounts,100000)})} + 1000</stringProp>
+          <stringProp name="query">SELECT COUNT(*), SUM(abalance) FROM bench_account WHERE aid BETWEEN ${__Random(1,${__P(accounts,100000)},rstart)} AND ${__intSum(${rstart},1000)}</stringProp>
           <stringProp name="queryType">Select Statement</stringProp>
           <stringProp name="queryArguments"></stringProp>
           <stringProp name="queryArgumentsTypes"></stringProp>
