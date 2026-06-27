@@ -1,0 +1,18 @@
+{
+  "title": "PostgreSQL(XcruzDB) vs Altibase 성능 비교 벤치마크",
+  "subtitle": "테스트 유형별 처리량·지연시간 비교 리포트",
+  "date": "2026-06-28",
+  "draft": true,
+  "databases": {
+    "pg":   { "label": "PostgreSQL (XcruzDB)", "color": "#336791" },
+    "alti": { "label": "Altibase",             "color": "#E4572E" }
+  },
+  "environment": {
+    "부하 도구": "Apache JMeter 5.6.3 (Kubernetes Job, JDBC)",
+    "PostgreSQL": "XcruzDB 1.1.p17.9 (PostgreSQL 17.9 코어 · coordinator+worker 2)",
+    "Altibase": "미측정 (드라이버/버전 확보 후 동일 절차로 측정)",
+    "데이터셋": "TPC-B류 포터블 스키마 · SF=10 (bench_account 100만 행)",
+    "접속": "JDBC, sslmode=require",
+    "측정 방식(드래프트)": "유형별 단발 30초 · 본 측정은 워밍업 + 3회 반복 중앙값 예정"
+  }
+}
