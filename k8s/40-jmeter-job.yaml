@@ -1,0 +1,111 @@
+# JMeter 워크로드 실행 Job + 메트릭 노출 Service.
+#
+# 선행(클러스터에만 생성, repo 미커밋 — 호스트/비밀번호 분리):
+#   1) DB 접속 비밀번호 Secret:
+#        kubectl -n benchmark create secret generic bench-db \
+#          --from-literal=jmeter.props='db.password=<PW>'
+#   2) DB 접속(비밀 아님) ConfigMap:
+#        kubectl -n benchmark create configmap bench-db-conn \
+#          --from-literal=DB_DRIVER=org.postgresql.Driver \
+#          --from-literal=DB_URL='jdbc:postgresql://<host>:5521/sgicpoc_bench?sslmode=require' \
+#          --from-literal=DB_USER=bench
+#   3) 테스트 계획 ConfigMap:
+#        kubectl -n benchmark create configmap jmeter-plans --from-file=jmeter/plans/
+#   4) 결과 디렉터리(노드): /data/bench-results (uid 1001 쓰기 가능하게 chmod 777)
+#
+# 실행 파라미터는 Job env 로 조정(PLAN_FILE/THREADS/DURATION/...). 재실행:
+#   kubectl -n benchmark delete job jmeter-bench --ignore-not-found && kubectl apply -f k8s/40-jmeter-job.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jmeter
+  namespace: benchmark
+  labels:
+    app.kubernetes.io/part-of: db-perf-benchmark
+    app.kubernetes.io/component: jmeter
+spec:
+  type: ClusterIP
+  selector:
+    app: jmeter-bench
+  ports:
+    - name: metrics
+      port: 9270
+      targetPort: metrics
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: jmeter-bench
+  namespace: benchmark
+  labels:
+    app.kubernetes.io/part-of: db-perf-benchmark
+    app.kubernetes.io/component: jmeter
+    app: jmeter-bench
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: db-perf-benchmark
+        app.kubernetes.io/component: jmeter
+        app: jmeter-bench
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: jmeter
+          image: benchmark/jmeter:5.6.3
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 9270
+          envFrom:
+            - configMapRef:
+                name: bench-db-conn        # DB_DRIVER / DB_URL / DB_USER
+          env:
+            - { name: PLAN_FILE, value: "01-read-only.jmx" }
+            - { name: THREADS,   value: "10" }
+            - { name: RAMPUP,    value: "5" }
+            - { name: DURATION,  value: "60" }
+            - { name: ACCOUNTS,  value: "1000000" }
+            - { name: TELLERS,   value: "100" }
+            - { name: BRANCHES,  value: "10" }
+            - { name: DB_POOL,   value: "40" }
+            - { name: RUN_TAG,   value: "manual" }
+          args:
+            - -n
+            - -t
+            - /test/$(PLAN_FILE)
+            - -q
+            - /secret/jmeter.props
+            - -Jdb.driver=$(DB_DRIVER)
+            - -Jdb.url=$(DB_URL)
+            - -Jdb.user=$(DB_USER)
+            - -Jdb.pool=$(DB_POOL)
+            - -Jthreads=$(THREADS)
+            - -Jrampup=$(RAMPUP)
+            - -Jduration=$(DURATION)
+            - -Jaccounts=$(ACCOUNTS)
+            - -Jtellers=$(TELLERS)
+            - -Jbranches=$(BRANCHES)
+            - -l
+            - /results/$(RUN_TAG)-$(PLAN_FILE).jtl
+          volumeMounts:
+            - { name: plans,   mountPath: /test }
+            - { name: secret,  mountPath: /secret, readOnly: true }
+            - { name: results, mountPath: /results }
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits:   { cpu: "2",    memory: "2Gi" }
+      volumes:
+        - name: plans
+          configMap:
+            name: jmeter-plans
+        - name: secret
+          secret:
+            secretName: bench-db
+        - name: results
+          hostPath:
+            path: /data/bench-results
+            type: DirectoryOrCreate
