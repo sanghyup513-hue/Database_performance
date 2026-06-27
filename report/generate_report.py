@@ -10,7 +10,7 @@ JMeter JTL 결과 → 집계 → 고객 제공용 PDF 리포트 생성.
 의존성: pandas, matplotlib, reportlab
 실행:   python generate_report.py --results <dir> --meta run_meta.json --out report.pdf
 """
-import argparse, glob, json, os, re, tempfile
+import argparse, base64, glob, html, json, os, re, tempfile
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
@@ -280,11 +280,128 @@ def build(data, meta, charts, outpath):
     doc.build(E, onFirstPage=lambda c, d: None, onLaterPages=footer)
 
 
+def build_html(data, meta, charts, outpath):
+    """자체완결형 HTML 조각 (Artifact용: html/head/body 태그 없이 title+style+content)."""
+    present = [db for db in meta["databases"] if db in data]
+    dbs = present or list(meta["databases"])
+
+    def esc(x): return html.escape(str(x))
+
+    def b64img(path):
+        if not path or not os.path.exists(path):
+            return ""
+        with open(path, "rb") as f:
+            return "data:image/png;base64," + base64.b64encode(f.read()).decode()
+
+    # summary table
+    def summary_rows():
+        out = []
+        head = "<th>테스트 유형</th>"
+        for db in dbs:
+            lbl = esc(meta["databases"][db]["label"])
+            head += f"<th>{lbl} TPS</th><th>p95(ms)</th><th>p99(ms)</th><th>에러%</th>"
+        out.append("<tr>" + head + "</tr>")
+        for k in TT_ORDER:
+            if not any(k in data.get(db, {}) for db in dbs):
+                continue
+            row = f"<td class='lt'>{esc(TT_NAME[k])}</td>"
+            for db in dbs:
+                s = data.get(db, {}).get(k)
+                if s:
+                    row += (f"<td>{s['throughput']:,.0f}</td><td>{s['p95']:.0f}</td>"
+                            f"<td>{s['p99']:.0f}</td><td>{s['error_rate']:.2f}</td>")
+                else:
+                    row += "<td>—</td><td>—</td><td>—</td><td>—</td>"
+            out.append("<tr>" + row + "</tr>")
+        return "\n".join(out)
+
+    def appendix(db):
+        head = ("<tr><th>유형</th><th>샘플수</th><th>TPS</th><th>avg</th><th>p50</th>"
+                "<th>p90</th><th>p95</th><th>p99</th><th>에러%</th></tr>")
+        rows = [head]
+        for k in TT_ORDER:
+            s = data.get(db, {}).get(k)
+            if not s:
+                continue
+            rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in [
+                esc(TT_NAME[k]), f"{s['samples']:,}", f"{s['throughput']:,.0f}", f"{s['avg']:.0f}",
+                f"{s['p50']:.0f}", f"{s['p90']:.0f}", f"{s['p95']:.0f}", f"{s['p99']:.0f}",
+                f"{s['error_rate']:.2f}"]) + "</tr>")
+        return "\n".join(rows)
+
+    env_rows = "\n".join(
+        f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>" for k, v in meta.get("environment", {}).items())
+    chart_html = "\n".join(
+        f"<h3>{esc(cap)}</h3><img class='chart' src='{b64img(img)}' alt='{esc(cap)}'/>"
+        for cap, img in charts if img)
+    appendix_html = "\n".join(
+        f"<h3>{esc(meta['databases'][db]['label'])}</h3>"
+        f"<div class='tw'><table class='data'>{appendix(db)}</table></div>" for db in dbs)
+    draft = ("<div class='badge'>DRAFT — 일부 DB 미측정 / 본 측정 전 초안</div>"
+             if meta.get("draft") else "")
+
+    css = """
+    :root{--navy:#1b2a4a;--blue:#33506e;--line:#d4dbe6;--bg:#f3f6fa;}
+    *{box-sizing:border-box;}
+    .rpt{max-width:860px;margin:0 auto;padding:0 4px;color:#1c2430;
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',sans-serif;line-height:1.55;}
+    .cover{background:linear-gradient(135deg,var(--navy),#33506e);color:#fff;border-radius:14px;
+      padding:34px 22px;text-align:center;margin:8px 0 18px;}
+    .cover h1{font-size:24px;margin:0 0 8px;line-height:1.3;}
+    .cover .sub{opacity:.9;font-size:14px;margin:0 0 6px;}
+    .cover .date{opacity:.75;font-size:12px;margin-top:14px;}
+    .badge{display:inline-block;background:#ffce54;color:#5a4500;font-weight:700;font-size:12px;
+      padding:4px 12px;border-radius:20px;margin-top:10px;}
+    h2{color:var(--navy);font-size:18px;border-bottom:2px solid var(--blue);padding-bottom:6px;margin:26px 0 12px;}
+    h3{color:var(--blue);font-size:14px;margin:18px 0 6px;}
+    p{font-size:14px;} .note{color:#667;font-size:12px;}
+    .tw{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+    table{border-collapse:collapse;width:100%;font-size:13px;min-width:480px;margin:6px 0;}
+    th,td{border:1px solid var(--line);padding:7px 9px;text-align:center;}
+    th{background:var(--blue);color:#fff;font-weight:600;}
+    td.lt{text-align:left;font-weight:600;}
+    tr:nth-child(even) td{background:var(--bg);}
+    table.env{min-width:0;} table.env th{width:38%;text-align:left;}
+    table.env td{text-align:left;}
+    img.chart{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;margin:4px 0 8px;}
+    @media(max-width:600px){.cover h1{font-size:20px;}h2{font-size:16px;}}
+    """
+    title = esc(meta.get("title", "DB 성능 비교 벤치마크"))
+    doc = f"""<title>{title}</title>
+<style>{css}</style>
+<div class="rpt">
+  <div class="cover">
+    <h1>{title}</h1>
+    <div class="sub">{esc(meta.get('subtitle',''))}</div>
+    {draft}
+    <div class="date">작성일: {esc(meta.get('date',''))}</div>
+  </div>
+
+  <h2>1. 핵심 요약</h2>
+  <p class="note">TPS는 높을수록, 지연시간(p95/p99)은 낮을수록 우수.</p>
+  <div class="tw"><table>{summary_rows()}</table></div>
+
+  <h2>2. 테스트 환경 및 방법</h2>
+  <table class="env">{env_rows}</table>
+  <p class="note">측정 지표: TPS·지연시간 p50/p95/p99·에러율. K8s의 JMeter가 JDBC로 부하 생성, 두 DB에 동일 계획·스케일 적용.</p>
+
+  <h2>3. 유형별 결과</h2>
+  {chart_html}
+
+  <h2>부록. 상세 수치</h2>
+  {appendix_html}
+</div>
+"""
+    with open(outpath, "w", encoding="utf-8") as f:
+        f.write(doc)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", required=True)
     ap.add_argument("--meta", default="run_meta.json")
     ap.add_argument("--out", default="report.pdf")
+    ap.add_argument("--html", default=None, help="자체완결형 HTML 조각 출력 경로")
     a = ap.parse_args()
     meta = load_meta(a.meta)
     data = discover(a.results)
@@ -306,6 +423,9 @@ def main():
     ]
     build(data, meta, charts, a.out)
     print("PDF 생성:", a.out)
+    if a.html:
+        build_html(data, meta, charts, a.html)
+        print("HTML 생성:", a.html)
 
 
 if __name__ == "__main__":
