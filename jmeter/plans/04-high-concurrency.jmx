@@ -23,7 +23,7 @@
         <stringProp name="initQuery"></stringProp>
         <boolProp name="keepAlive">true</boolProp>
         <stringProp name="password">${__P(db.password)}</stringProp>
-        <stringProp name="poolMax">${__P(db.pool,256)}</stringProp>
+        <stringProp name="poolMax">${__P(db.pool,40)}</stringProp>
         <boolProp name="preinit">false</boolProp>
         <stringProp name="timeout">10000</stringProp>
         <stringProp name="transactionIsolation">DEFAULT</stringProp>
