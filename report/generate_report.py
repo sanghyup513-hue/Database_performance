@@ -10,7 +10,8 @@ JMeter JTL 결과 → 집계 → 고객 제공용 PDF 리포트 생성.
 의존성: pandas, matplotlib, reportlab
 실행:   python generate_report.py --results <dir> --meta run_meta.json --out report.pdf
 """
-import argparse, base64, glob, html, json, os, re, tempfile
+import argparse, base64, glob, html, json, os, re, statistics, tempfile
+import urllib.parse, urllib.request
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
@@ -71,7 +72,16 @@ TT_EXPLAIN = {
         "아니라 중간 비율이므로, 비율을 바꿔가며(스윕) 처리량·지연 곡선을 비교한다.",
 }
 
-FNAME_RE = re.compile(r"^(?P<db>[a-z0-9]+)__(?P<key>\d{2}_[a-z_]+)\.jtl$", re.I)
+FNAME_RE = re.compile(r"^(?P<db>[a-z0-9]+)__(?P<key>\d{2}_[a-z_]+)(?:__r\d+)?\.jtl$", re.I)
+
+# node_exporter instance 라벨 (호스트 자원). meta 로 덮어쓸 수 있음.
+NODE_DB = "192.168.0.221:9100"
+NODE_LG = "192.168.0.11:9100"
+
+RES_METRICS = [  # (key, 라벨, 단위)
+    ("db_cpu", "DB CPU", "%"), ("db_mem", "DB MEM", "%"),
+    ("db_disk", "DB DiskIO", "%"), ("lg_cpu", "부하기 CPU", "%"),
+]
 
 
 def load_meta(path):
@@ -88,34 +98,68 @@ def load_meta(path):
     return default
 
 
-def summarize_jtl(path):
+def summarize_jtl(path, warmup_s=0):
     df = pd.read_csv(path, usecols=["timeStamp", "elapsed", "success"],
                      dtype={"success": str}, on_bad_lines="skip")
+    if df.empty:
+        return None
+    t0 = df["timeStamp"].min()
+    if warmup_s > 0:                      # 워밍업 구간(앞 warmup_s초) 제외
+        df = df[df["timeStamp"] >= t0 + warmup_s * 1000]
     if df.empty:
         return None
     n = len(df)
     ok = df["success"].str.lower().eq("true")
     errors = int((~ok).sum())
-    wall = (df["timeStamp"].max() - df["timeStamp"].min()) / 1000.0
+    t_start, t_end = df["timeStamp"].min(), df["timeStamp"].max()
+    wall = (t_end - t_start) / 1000.0
     wall = wall if wall > 0 else 1.0
     el = df["elapsed"].astype(float)
     return {
-        "samples": n,
-        "errors": errors,
-        "error_rate": 100.0 * errors / n,
+        "samples": n, "errors": errors, "error_rate": 100.0 * errors / n,
         "throughput": n / wall,
-        "avg": el.mean(),
-        "p50": el.quantile(0.50),
-        "p90": el.quantile(0.90),
-        "p95": el.quantile(0.95),
-        "p99": el.quantile(0.99),
-        "duration_s": wall,
+        "avg": el.mean(), "p50": el.quantile(.50), "p90": el.quantile(.90),
+        "p95": el.quantile(.95), "p99": el.quantile(.99), "duration_s": wall,
+        "_t_end": t_end / 1000.0, "_window": wall,
     }
 
 
-def discover(results_dir):
-    """returns {db: {key: summary}}"""
-    data = {}
+def prom_q(prom_url, expr, t):
+    """Prometheus instant query → float or None."""
+    if not prom_url:
+        return None
+    u = prom_url.rstrip("/") + "/api/v1/query?" + urllib.parse.urlencode(
+        {"query": expr, "time": f"{t:.0f}"})
+    try:
+        with urllib.request.urlopen(u, timeout=10) as r:
+            res = json.load(r)["data"]["result"]
+        return round(float(res[0]["value"][1]), 1) if res else None
+    except Exception:
+        return None
+
+
+def resources(prom_url, t_end, w):
+    """측정 구간 [t_end-w, t_end] 의 호스트 자원 평균."""
+    if not prom_url or w < 5:
+        return {k: None for k, _, _ in RES_METRICS}
+    w = int(w)
+    Q = {
+        "db_cpu":  f'100*(1-avg(rate(node_cpu_seconds_total{{instance="{NODE_DB}",mode="idle"}}[{w}s])))',
+        "db_mem":  f'100*(1-avg_over_time(node_memory_MemAvailable_bytes{{instance="{NODE_DB}"}}[{w}s])/node_memory_MemTotal_bytes{{instance="{NODE_DB}"}})',
+        "db_disk": f'100*max(rate(node_disk_io_time_seconds_total{{instance="{NODE_DB}"}}[{w}s]))',
+        "lg_cpu":  f'100*(1-avg(rate(node_cpu_seconds_total{{instance="{NODE_LG}",mode="idle"}}[{w}s])))',
+    }
+    return {k: prom_q(prom_url, v, t_end) for k, v in Q.items()}
+
+
+def _median(vals):
+    vals = [v for v in vals if v is not None]
+    return round(statistics.median(vals), 1) if vals else None
+
+
+def discover(results_dir, warmup_s=0, prom_url=None):
+    """다회 반복 JTL 을 (db,key)별로 모아 중앙값 산출. returns {db:{key: median_dict}}"""
+    runs = {}  # (db,key) -> [summary(+resources)]
     for p in sorted(glob.glob(os.path.join(results_dir, "*.jtl"))):
         m = FNAME_RE.match(os.path.basename(p))
         if not m:
@@ -123,9 +167,18 @@ def discover(results_dir):
         db, key = m.group("db").lower(), m.group("key").lower()
         if key not in TT_ORDER:
             continue
-        s = summarize_jtl(p)
-        if s:
-            data.setdefault(db, {})[key] = s
+        s = summarize_jtl(p, warmup_s)
+        if not s:
+            continue
+        s.update(resources(prom_url, s["_t_end"], s["_window"]))
+        runs.setdefault((db, key), []).append(s)
+    data = {}
+    metrics = ["samples", "errors", "error_rate", "throughput", "avg",
+               "p50", "p90", "p95", "p99"] + [k for k, _, _ in RES_METRICS]
+    for (db, key), lst in runs.items():
+        med = {mt: _median([r.get(mt) for r in lst]) for mt in metrics}
+        med["nruns"] = len(lst)
+        data.setdefault(db, {})[key] = med
     return data
 
 
@@ -218,6 +271,30 @@ def metrics_table(data, dbs, meta, st):
     return t
 
 
+def res_table(data, db, meta, st):
+    """단일 DB의 유형별 호스트 자원 사용률 표 (측정 구간 평균)."""
+    head = ["테스트 유형"] + [lbl for _, lbl, _ in RES_METRICS]
+    rows = [[Paragraph(h, st["cellb"]) for h in head]]
+    for k in TT_ORDER:
+        s = data.get(db, {}).get(k)
+        if not s:
+            continue
+        row = [Paragraph(TT_NAME[k], st["cell"])]
+        for mk, _, _ in RES_METRICS:
+            v = s.get(mk)
+            row.append(Paragraph("—" if v is None else f"{v:.1f}", st["cell"]))
+        rows.append(row)
+    t = Table(rows, colWidths=[38 * mm] + [28 * mm] * len(RES_METRICS), repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#33506e")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#bbb")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f3f6fa")]),
+        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    return t
+
+
 def env_table(meta, st):
     rows = []
     for k, v in meta.get("environment", {}).items():
@@ -290,6 +367,17 @@ def build(data, meta, charts, outpath):
         if img and os.path.exists(img):
             E += [Paragraph(cap, st["h2"]), Image(img, width=165 * mm, height=74 * mm), Spacer(1, 4 * mm)]
     E += [PageBreak()]
+
+    # ── Resource utilization ──
+    if any(any(data.get(db, {}).get(k, {}).get("db_cpu") is not None for k in TT_ORDER) for db in (present or dbs)):
+        E += [Paragraph("5. 자원 사용률 (호스트)", st["h1"]), HRule(165 * mm), Spacer(1, 4 * mm),
+              Paragraph("각 테스트 측정 구간의 DB 서버·부하생성기 자원 평균. 클라이언트(부하기) CPU가 높으면 "
+                        "DB가 아니라 부하 생성 측 병목일 수 있으니 함께 본다.", st["body"]), Spacer(1, 3 * mm)]
+        for db in (present or dbs):
+            if any(data.get(db, {}).get(k, {}).get("db_cpu") is not None for k in TT_ORDER):
+                E += [Paragraph(meta["databases"][db]["label"], st["h2"]),
+                      res_table(data, db, meta, st), Spacer(1, 4 * mm)]
+        E += [PageBreak()]
 
     # ── Appendix: full numbers ──
     E += [Paragraph("부록. 상세 수치", st["h1"]), HRule(165 * mm), Spacer(1, 4 * mm)]
@@ -376,6 +464,25 @@ def build_html(data, meta, charts, outpath):
         f"<div class='ex'><div class='ex-h'>{esc(TT_NAME[k])} "
         f"<span class='ex-t'>· {esc(TT_DESC[k])}</span></div>"
         f"<p>{esc(TT_EXPLAIN[k])}</p></div>" for k in TT_ORDER)
+
+    has_res = any(data.get(db, {}).get(k, {}).get("db_cpu") is not None
+                  for db in dbs for k in TT_ORDER)
+
+    def res_block(db):
+        head = "<th>테스트 유형</th>" + "".join(f"<th>{esc(l)}</th>" for _, l, _ in RES_METRICS)
+        rows = ["<tr>" + head + "</tr>"]
+        for k in TT_ORDER:
+            s = data.get(db, {}).get(k)
+            if not s:
+                continue
+            cells = f"<td class='lt'>{esc(TT_NAME[k])}</td>"
+            for mk, _, _ in RES_METRICS:
+                v = s.get(mk)
+                cells += f"<td>{'—' if v is None else f'{v:.1f}'}</td>"
+            rows.append("<tr>" + cells + "</tr>")
+        return (f"<h3>{esc(meta['databases'][db]['label'])}</h3>"
+                f"<div class='tw'><table>{chr(10).join(rows)}</table></div>")
+    resource_html = ("".join(res_block(db) for db in dbs) if has_res else "")
     appendix_html = "\n".join(
         f"<h3>{esc(meta['databases'][db]['label'])}</h3>"
         f"<div class='tw'><table class='data'>{appendix(db)}</table></div>" for db in dbs)
@@ -438,6 +545,8 @@ def build_html(data, meta, charts, outpath):
   <h2>4. 유형별 결과</h2>
   {chart_html}
 
+  {("<h2>5. 자원 사용률 (호스트)</h2><p class='note'>각 테스트 측정 구간의 DB 서버·부하생성기 자원 평균. 부하기 CPU가 높으면 DB가 아닌 부하 생성 측 병목일 수 있음.</p>" + resource_html) if has_res else ""}
+
   <h2>부록. 상세 수치</h2>
   {appendix_html}
 </div>
@@ -452,13 +561,16 @@ def main():
     ap.add_argument("--meta", default="run_meta.json")
     ap.add_argument("--out", default="report.pdf")
     ap.add_argument("--html", default=None, help="자체완결형 HTML 조각 출력 경로")
+    ap.add_argument("--warmup", type=int, default=0, help="측정 제외 워밍업 초")
+    ap.add_argument("--prometheus", default=None, help="자원 사용률 조회용 Prometheus URL")
     a = ap.parse_args()
     meta = load_meta(a.meta)
-    data = discover(a.results)
+    data = discover(a.results, warmup_s=a.warmup, prom_url=a.prometheus)
     present = [db for db in meta["databases"] if db in data]
-    print("측정된 DB:", present or "(없음)")
+    print("측정된 DB:", present or "(없음)", "| warmup:", a.warmup, "| prom:", bool(a.prometheus))
     for db in present:
-        print(" ", db, "유형:", sorted(data[db].keys()))
+        nr = max((data[db][k].get("nruns", 1) for k in data[db]), default=1)
+        print(" ", db, "유형:", sorted(data[db].keys()), f"(반복 {nr}회 중앙값)")
     tmp = tempfile.mkdtemp()
     charts = [
         ("처리량 (TPS, 높을수록 우수)",
@@ -471,6 +583,10 @@ def main():
          bar_chart(data, present, meta, "p99", "ms", "p99 latency by test type",
                    os.path.join(tmp, "p99.png"), lower_better=True)),
     ]
+    if a.prometheus:
+        charts.append(("DB 서버 CPU 사용률 (%, 측정 구간 평균)",
+                       bar_chart(data, present, meta, "db_cpu", "%", "DB CPU utilization by test type",
+                                 os.path.join(tmp, "dbcpu.png"))))
     build(data, meta, charts, a.out)
     print("PDF 생성:", a.out)
     if a.html:

@@ -54,6 +54,11 @@ data:
         scrape_interval: 5s
         file_sd_configs:
           - files: ['/etc/prometheus/targets/jmeter.json']
+      # 호스트 자원(node_exporter): DB 서버 + 부하생성기 CPU/메모리/디스크IO/네트워크
+      - job_name: node
+        scrape_interval: 5s
+        file_sd_configs:
+          - files: ['/etc/prometheus/targets/node.json']
 ---
 apiVersion: apps/v1
 kind: Deployment
